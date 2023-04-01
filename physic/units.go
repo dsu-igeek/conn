@@ -1122,6 +1122,124 @@ const (
 	maxFootPerSecond Speed = 30260406945
 )
 
+// Acceleration is a measurement of change of velocity stored as an int64 nano
+// Metre per Second squared.
+//
+type Acceleration int64
+
+// String returns the speed formatted as a string in m/s.
+func (a Acceleration) String() string {
+	return nanoAsString(int64(a)) + "m/s^2"
+}
+
+// Well known Acceleration constants.
+const (
+	// MetrePerSecond is m/s^2.
+	NanoMetrePerSecondSquared  Acceleration = 1
+	MicroMetrePerSecondSquared Acceleration = 1000 * NanoMetrePerSecondSquared
+	MilliMetrePerSecondSquared Acceleration = 1000 * NanoMetrePerSecondSquared
+	MetrePerSecondSquared      Acceleration = 1000 * NanoMetrePerSecondSquared
+	KiloMetrePerSecondSquared  Acceleration = 1000 * NanoMetrePerSecondSquared
+	MegaMetrePerSecondSquared  Acceleration = 1000 * NanoMetrePerSecondSquared
+	GigaMetrePerSecondSquared  Acceleration = 1000 * NanoMetrePerSecondSquared
+
+	FootPerSecondSquared Acceleration = 304800 * MicroMetrePerSecondSquared
+
+	Gravity = 980665 * MicroMetrePerSecondSquared
+
+	maxAcceleration Acceleration = (1 << 63) - 1
+	minAcceleration Acceleration = -((1 << 63) - 1)
+
+	// Min Max FootPerSecondSquared are in f/s^2.
+	minFootPerSecondSquared Acceleration = -30260406945
+	maxFootPerSecondSquared Acceleration = 30260406945
+)
+
+// Set sets the Speed to the value represented by s. Units are to be provided in
+// "mps"(meters per second), "m/s", "kph", "fps", or "mph" with an optional SI
+// prefix: "p", "n", "u", "µ", "m", "k", "M", "G" or "T".
+func (a *Acceleration) Set(s string) error {
+	d, n, err := atod(s)
+	if err != nil {
+		if e, ok := err.(*parseError); ok {
+			switch e.error {
+			case errNotANumber:
+				if found := hasSuffixes(s[n:], "m/s^2", "g", "f/s^2"); found != "" {
+					return err
+				}
+				return notNumberUnitErr("m/s^2, g, or f/2^2")
+			case errOverflowsInt64:
+				// TODO(maruel): Look for suffix, and reuse it.
+				return maxValueErr(maxAcceleration.String())
+			case errOverflowsInt64Negative:
+				// TODO(maruel): Look for suffix, and reuse it.
+				return minValueErr(minAcceleration.String())
+			}
+		}
+		return err
+	}
+
+	var si prefix
+	if n != len(s) {
+		r, rsize := utf8.DecodeRuneInString(s[n:])
+		if r <= 1 || rsize == 0 {
+			return errors.New("unexpected end of string")
+		}
+		var siSize int
+		si, siSize = parseSIPrefix(r)
+		if si == milli {
+			switch s[n:] {
+			case "m/s^2":
+				si = unit
+				siSize = 0
+			}
+		}
+		if si == kilo {
+			switch s[n:] {
+			case "kph":
+				si = unit
+				siSize = 0
+			}
+		}
+		n += siSize
+	}
+	switch s[n:] {
+	case "m/s^2":
+		v, overflow := dtoi(d, int(si-nano))
+		if overflow {
+			if d.neg {
+				return minValueErr(minSpeed.String())
+			}
+			return maxValueErr(maxSpeed.String())
+		}
+		*a = (Acceleration)(v)
+	case "f/s^2":
+		mpsPerfps := decimal{
+			base: uint64(FootPerSecondSquared / 1000),
+			exp:  3,
+			neg:  false,
+		}
+		oz, _ := decimalMul(d, mpsPerfps)
+		v, overflow := dtoi(oz, int(si))
+		if overflow {
+			if oz.neg {
+				return minValueErr(strconv.FormatInt(int64(minFootPerSecond), 10) + "fps")
+			}
+			return maxValueErr(strconv.FormatInt(int64(maxFootPerSecond), 10) + "fps")
+		}
+		*a = (Acceleration)(v)
+
+	case "":
+		return noUnitErr("m/s^2, g, or f/2^2")
+	default:
+		if found := hasSuffixes(s[n:], "m/s^2", "g", "f/s^2"); found != "" {
+			return unknownUnitPrefixErr(found, "p,n,u,µ,m,k,M,G or T")
+		}
+		return incorrectUnitErr("m/s^2, g, or f/2^2")
+	}
+	return nil
+}
+
 // Temperature is a measurement of hotness stored as a nano kelvin.
 //
 // Negative values are invalid.
